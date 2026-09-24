@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedidos Serverless | Portafolio 10</title>
+<style>
+  :root { --azul:#1f5fbf; --azul-osc:#154089; --gris:#f3f5f9; --borde:#d5dbe6; --texto:#1c2430; --ok:#1a7f45; --error:#b3261e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", Arial, sans-serif; background:var(--gris); color:var(--texto); }
+  header { background:var(--azul-osc); color:#fff; padding:24px 20px; }
+  header h1 { margin:0 0 6px; font-size:26px; }
+  header p { margin:0; opacity:.9; font-size:14px; }
+  main { max-width:900px; margin:0 auto; padding:20px; }
+  .tarjeta { background:#fff; border:1px solid var(--borde); border-radius:10px; padding:18px; margin-bottom:18px; }
+  .tarjeta h2 { margin:0 0 12px; font-size:18px; color:var(--azul-osc); }
+  label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+  input { width:100%; padding:9px 10px; border:1px solid var(--borde); border-radius:6px; font-size:15px; }
+  .fila { display:grid; grid-template-columns:1fr 1fr 120px; gap:12px; }
+  @media (max-width:640px){ .fila { grid-template-columns:1fr; } }
+  button { background:var(--azul); color:#fff; border:0; border-radius:6px; padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer; margin:12px 8px 0 0; }
+  button:hover { background:var(--azul-osc); }
+  button.secundario { background:#fff; color:var(--azul-osc); border:1px solid var(--azul); }
+  button.peligro { background:#fff; color:var(--error); border:1px solid var(--error); }
+  button:disabled { opacity:.5; cursor:wait; }
+  .mensaje { margin-top:12px; font-size:14px; min-height:20px; }
+  .ok { color:var(--ok); } .error { color:var(--error); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--borde); }
+  th { background:var(--gris); }
+  .tabla-scroll { overflow-x:auto; }
+  .metricas { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-top:12px; }
+  .metrica { background:var(--gris); border-radius:8px; padding:10px; text-align:center; }
+  .metrica b { display:block; font-size:20px; color:var(--azul-osc); }
+  .metrica span { font-size:12px; }
+  small { color:#5a6577; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pedidos Serverless</h1>
+  <p>Caso de estudio: S3 + API Gateway + Lambda (Python) + DynamoDB + CloudWatch + SNS</p>
+</header>
+
+<main>
+  <!-- 1. Configuración de la URL de la API -->
+  <section class="tarjeta" id="config">
+    <h2>1. Conectar con la API</h2>
+    <label for="apiUrl">URL de invocación de API Gateway (sin "/" al final)</label>
+    <input id="apiUrl" type="text" placeholder="https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com">
+    <button id="btnGuardar">Guardar URL</button>
+    <button id="btnSalud" class="secundario">Probar conexión (GET /salud)</button>
+    <div class="mensaje" id="msgConfig"></div>
+  </section>
+
+  <!-- 2. Crear pedido -->
+  <section class="tarjeta">
+    <h2>2. Crear un pedido (POST /pedidos)</h2>
+    <div class="fila">
+      <div><label for="cliente">Cliente</label><input id="cliente" maxlength="50" placeholder="Ej.: Ana Pérez"></div>
+      <div><label for="producto">Producto</label><input id="producto" maxlength="50" placeholder="Ej.: Teclado"></div>
+      <div><label for="cantidad">Cantidad</label><input id="cantidad" type="number" min="1" max="100" value="1"></div>
+    </div>
+    <button id="btnCrear">Crear pedido</button>
+    <div class="mensaje" id="msgCrear"></div>
+  </section>
+
+  <!-- 3. Lista de pedidos -->
+  <section class="tarjeta">
+    <h2>3. Pedidos guardados (GET /pedidos)</h2>
+    <button id="btnListar" class="secundario" style="margin-top:0">Actualizar lista</button>
+    <div class="mensaje" id="msgLista"></div>
+    <div class="tabla-scroll">
+      <table>
+        <thead><tr><th>ID (parcial)</th><th>Cliente</th><th>Producto</th><th>Cant.</th><th>Estado</th><th>Fecha (UTC)</th></tr></thead>
+        <tbody id="cuerpoTabla"><tr><td colspan="6"><small>Sin datos todavía.</small></td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 4. Métricas y pruebas -->
+  <section class="tarjeta">
+    <h2>4. Métricas y pruebas para el caso de estudio</h2>
+    <small>Mide el tiempo de respuesta desde tu navegador hasta la API y de vuelta. Sirve para llenar la tabla de métricas del portafolio.</small><br>
+    <button id="btnCarga">Prueba de rendimiento (50 solicitudes)</button>
+    <button id="btnFalla" class="peligro">Simular falla (probar alarma)</button>
+    <div class="mensaje" id="msgPrueba"></div>
+    <div class="metricas" id="metricas"></div>
+  </section>
+</main>
+
+<script>
+  // Opcional: pegar aquí la URL para que quede fija. Si queda vacía, se usa el cuadro de texto.
+  const API_URL_FIJA = "";
+
+  const $ = (id) => document.getElementById(id);
+
+  function leerGuardada() { try { return localStorage.getItem("p10_api_url") || ""; } catch (e) { return ""; } }
+  function guardar(url) { try { localStorage.setItem("p10_api_url", url); } catch (e) { /* sin almacenamiento */ } }
+  function api() { return (API_URL_FIJA || $("apiUrl").value || "").trim().replace(/\/+$/, ""); }
+
+  function mostrar(idMsg, texto, esError) {
+    const el = $(idMsg);
+    el.textContent = texto;
+    el.className = "mensaje " + (esError ? "error" : "ok");
+  }
+
+  async function llamar(ruta, opciones) {
+    if (!api()) throw new Error("Primero escribe y guarda la URL de la API.");
+    const inicio = performance.now();
+    const respuesta = await fetch(api() + ruta, Object.assign({ cache: "no-store" }, opciones));
+    const ms = Math.round(performance.now() - inicio);
+    let datos = null;
+    try { datos = await respuesta.json(); } catch (e) { /* respuesta sin JSON */ }
+    return { respuesta, datos, ms };
+  }
+
+  $("btnGuardar").addEventListener("click", () => {
+    guardar($("apiUrl").value.trim());
+    mostrar("msgConfig", "URL guardada en este navegador.", false);
+  });
+
+  $("btnSalud").addEventListener("click", async () => {
+    try {
+      const { respuesta, datos, ms } = await llamar("/salud");
+      if (respuesta.ok) mostrar("msgConfig", "Conexión correcta: " + datos.estado + " (" + ms + " ms).", false);
+      else mostrar("msgConfig", "La API respondió con código " + respuesta.status + ".", true);
+    } catch (e) { mostrar("msgConfig", "No fue posible conectar: " + e.message, true); }
+  });
+
+  $("btnCrear").addEventListener("click", async () => {
+    const boton = $("btnCrear"); boton.disabled = true;
+    try {
+      const cuerpo = {
+        cliente: $("cliente").value.trim(),
+        producto: $("producto").value.trim(),
+        cantidad: Number($("cantidad").value)
+      };
+      const { respuesta, datos, ms } = await llamar("/pedidos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cuerpo)
+      });
+      if (respuesta.status === 201) {
+        mostrar("msgCrear", "Pedido creado en " + ms + " ms.", false);
+        $("cliente").value = ""; $("producto").value = ""; $("cantidad").value = 1;
+        await listar();
+      } else {
+        const detalle = datos && datos.detalle ? " (" + datos.detalle.join("; ") + ")" : "";
+        mostrar("msgCrear", ((datos && datos.error) || "Error " + respuesta.status) + detalle, true);
+      }
+    } catch (e) { mostrar("msgCrear", "No fue posible crear el pedido: " + e.message, true); }
+    boton.disabled = false;
+  });
+
+  async function listar() {
+    try {
+      const { respuesta, datos, ms } = await llamar("/pedidos");
+      if (!respuesta.ok) { mostrar("msgLista", "La API respondió con código " + respuesta.status + ".", true); return; }
+      const cuerpo = $("cuerpoTabla");
+      cuerpo.textContent = "";
+      if (!datos.pedidos.length) {
+        const tr = document.createElement("tr"); const td = document.createElement("td");
+        td.colSpan = 6; td.textContent = "Todavía no hay pedidos."; tr.appendChild(td); cuerpo.appendChild(tr);
+      }
+      datos.pedidos.forEach((p) => {
+        const tr = document.createElement("tr");
+        [String(p.orderId).slice(0, 8), p.cliente, p.producto, p.cantidad, p.estado, String(p.fecha).replace("T", " ").replace("+00:00", "")]
+          .forEach((valor) => { const td = document.createElement("td"); td.textContent = valor; tr.appendChild(td); });
+        cuerpo.appendChild(tr);
+      });
+      mostrar("msgLista", datos.total + " pedido(s) cargado(s) en " + ms + " ms.", false);
+    } catch (e) { mostrar("msgLista", "No fue posible cargar la lista: " + e.message, true); }
+  }
+  $("btnListar").addEventListener("click", listar);
+
+  $("btnFalla").addEventListener("click", async () => {
+    try {
+      const { respuesta } = await llamar("/salud?simular_error=1");
+      mostrar("msgPrueba", "Falla simulada enviada (la API respondió " + respuesta.status + "). Repite 2 o 3 veces y revisa CloudWatch y tu correo.", false);
+    } catch (e) { mostrar("msgPrueba", "No fue posible enviar la falla: " + e.message, true); }
+  });
+
+  $("btnCarga").addEventListener("click", async () => {
+    const boton = $("btnCarga"); boton.disabled = true;
+    const total = 50, concurrencia = 10;
+    const tiempos = []; let errores = 0; let indice = 0;
+    try {
+      if (!api()) throw new Error("Primero escribe y guarda la URL de la API.");
+      mostrar("msgPrueba", "Ejecutando " + total + " solicitudes (" + concurrencia + " en paralelo)...", false);
+      const inicio = performance.now();
+      const trabajador = async () => {
+        while (indice < total) {
+          indice++;
+          const t0 = performance.now();
+          try {
+            const r = await fetch(api() + "/salud", { cache: "no-store" });
+            if (r.ok) tiempos.push(performance.now() - t0); else errores++;
+          } catch (e) { errores++; }
+        }
+      };
+      await Promise.all(Array.from({ length: concurrencia }, trabajador));
+      const duracion = (performance.now() - inicio) / 1000;
+      tiempos.sort((a, b) => a - b);
+      const pct = (p) => tiempos.length ? tiempos[Math.min(tiempos.length - 1, Math.floor(p * tiempos.length))] : 0;
+      const prom = tiempos.length ? tiempos.reduce((a, b) => a + b, 0) / tiempos.length : 0;
+      const datos = [
+        [tiempos.length + "/" + total, "Exitosas"],
+        [errores, "Con error"],
+        [Math.round(prom) + " ms", "Promedio"],
+        [Math.round(pct(0.5)) + " ms", "Mediana (p50)"],
+        [Math.round(pct(0.95)) + " ms", "p95"],
+        [Math.round(tiempos.length ? tiempos[tiempos.length - 1] : 0) + " ms", "Máximo"],
+        [(total / duracion).toFixed(1) + " /s", "Solicitudes por segundo"]
+      ];
+      const cont = $("metricas"); cont.textContent = "";
+      datos.forEach(([valor, etiqueta]) => {
+        const d = document.createElement("div"); d.className = "metrica";
+        const b = document.createElement("b"); b.textContent = valor;
+        const s = document.createElement("span"); s.textContent = etiqueta;
+        d.appendChild(b); d.appendChild(s); cont.appendChild(d);
+      });
+      mostrar("msgPrueba", "Prueba terminada en " + duracion.toFixed(1) + " s. Toma una captura de estos resultados.", errores > 0);
+    } catch (e) { mostrar("msgPrueba", e.message, true); }
+    boton.disabled = false;
+  });
+
+  // Al abrir la página: cargar la URL fija o la guardada
+  $("apiUrl").value = API_URL_FIJA || leerGuardada();
+  if (API_URL_FIJA) $("config").style.display = "none";
+</script>
+</body>
+</html>
